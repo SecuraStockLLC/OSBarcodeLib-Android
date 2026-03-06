@@ -198,6 +198,10 @@ class OSBARCScannerActivity : ComponentActivity() {
             .requireLensFacing(if (parameters.cameraDirection == CAM_DIRECTION_FRONT) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
             .build()
 
+        // Reset highlight state for fresh start
+        detectedBarcodeBox = null
+        showHighlight = false
+
         barcodeAnalyzer = OSBARCBarcodeAnalyzer(
             OSBARCScanLibraryFactory.createScanLibraryWrapper(
                 parameters.androidScanningLibrary ?: "",
@@ -1005,8 +1009,9 @@ class OSBARCScannerActivity : ComponentActivity() {
             isScanning = false
 
             // Show highlight if enabled
-            if (parameters.highlightEnabled) {
-                detectedBarcodeBox = scanResult.boundingBox
+            if (parameters.highlightEnabled && scanResult.boundingBox != null) {
+                // Transform bounding box from cropped bitmap coords to screen coords
+                detectedBarcodeBox = transformBoundingBoxToScreen(scanResult.boundingBox)
                 showHighlight = true
             }
 
@@ -1050,6 +1055,89 @@ class OSBARCScannerActivity : ComponentActivity() {
             setResult(error.code)
             finish()
         }
+    }
+
+    /**
+     * Transforms bounding box coordinates from cropped bitmap space to Canvas space.
+     *
+     * The barcode detection runs on a cropped region of the camera frame:
+     * - Portrait: cropped to 60% of height (which is width when rotated), square region
+     * - Landscape: cropped to 60% width x 50% height, centered
+     *
+     * The Canvas draws the highlight, so coordinates need to be in Canvas space.
+     * The Canvas fills the scanning area with specific dimensions.
+     */
+    private fun transformBoundingBoxToScreen(boundingBox: OSBARCBoundingBox): OSBARCBoundingBox {
+        // Get screen dimensions in pixels
+        val density = resources.displayMetrics.density
+        val screenWidthPx = screenWidth.value * density
+        val screenHeightPx = screenHeight.value * density
+
+        // Padding values (matching ScanScreenAim calculation)
+        val borderPadding = 32f * density  // ScannerBorderPadding
+        val cornerPadding = 16f * density  // ScannerAimRectCornerPadding
+
+        // Calculate Canvas dimensions (matching ScanScreenAim logic)
+        val canvasWidth: Float
+        val canvasHeight: Float
+
+        if (barcodeAnalyzer.isPortrait) {
+            // Portrait: canvas is screenWidth wide, and scanning rect is square
+            canvasWidth = screenWidthPx
+            canvasHeight = screenWidthPx  // Square scanning area for phones in portrait
+        } else {
+            // Landscape: canvas fills available space
+            canvasWidth = screenWidthPx
+            canvasHeight = screenHeightPx
+        }
+
+        // Calculate the actual scanning rectangle within the canvas
+        // This matches the calculation in ScanScreenAim onDraw
+        val rectWidth: Float
+        val rectHeight: Float
+
+        if (barcodeAnalyzer.isPortrait) {
+            rectWidth = canvasWidth - (borderPadding * 2) - (cornerPadding * 2)
+            rectHeight = rectWidth  // Square
+        } else {
+            rectWidth = canvasWidth - (cornerPadding * 2)
+            rectHeight = canvasHeight - (borderPadding * 2) - (cornerPadding * 2)
+        }
+
+        val rectLeft = (canvasWidth - rectWidth) / 2
+        val rectTop = (canvasHeight - rectHeight) / 2
+
+        // The cropped bitmap dimensions (from cropBitmap in OSBARCBarcodeAnalyzer)
+        // Camera resolution is 1920x1080, but in portrait the image is rotated
+        val cameraWidth = if (barcodeAnalyzer.isPortrait) 1080f else 1920f
+        val cameraHeight = if (barcodeAnalyzer.isPortrait) 1920f else 1080f
+
+        // Crop ratios from Sizes.kt
+        val cropRatioWidth = 0.6f
+        val cropRatioHeight = if (barcodeAnalyzer.isPortrait) cropRatioWidth else 0.5f
+
+        val croppedWidth = if (barcodeAnalyzer.isPortrait) {
+            cameraHeight * cropRatioWidth  // In portrait, width comes from height due to rotation
+        } else {
+            cameraWidth * cropRatioWidth
+        }
+        val croppedHeight = if (barcodeAnalyzer.isPortrait) {
+            croppedWidth  // Square crop in portrait
+        } else {
+            cameraHeight * cropRatioHeight
+        }
+
+        // Scale from cropped bitmap to scanning rectangle
+        val scaleX = rectWidth / croppedWidth
+        val scaleY = rectHeight / croppedHeight
+
+        // Transform coordinates
+        return OSBARCBoundingBox(
+            left = rectLeft + (boundingBox.left * scaleX),
+            top = rectTop + (boundingBox.top * scaleY),
+            right = rectLeft + (boundingBox.right * scaleX),
+            bottom = rectTop + (boundingBox.bottom * scaleY)
+        )
     }
 
     private fun makeViewFullscreen() {
