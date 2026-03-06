@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.outsystems.plugins.barcode.controller.helper.OSBARCMLKitHelperInterface
+import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCError
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
 import com.outsystems.plugins.barcode.model.OSBARCScannerHint
@@ -35,9 +36,18 @@ class OSBARCMLKitWrapper(private val helper: OSBARCMLKitHelperInterface): OSBARC
             helper.decodeImage(imageProxy, imageBitmap,
                 { barcodes ->
                     barcodes.firstOrNull()?.let { barcode ->
+                        val boundingBox = barcode.boundingBox?.let { rect ->
+                            OSBARCBoundingBox(
+                                left = rect.left.toFloat(),
+                                top = rect.top.toFloat(),
+                                right = rect.right.toFloat(),
+                                bottom = rect.bottom.toFloat()
+                            )
+                        }
                         val result = OSBARCScanResult(
                             text = barcode.rawValue ?: "",
-                            format = barcode.format.toOSBARCScannerHint()
+                            format = barcode.format.toOSBARCScannerHint(),
+                            boundingBox = boundingBox
                         )
                         if (result.text.isNotEmpty()) {
                             onSuccess(result)

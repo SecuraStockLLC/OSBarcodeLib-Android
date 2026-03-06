@@ -1,6 +1,7 @@
 package com.outsystems.plugins.barcode.view
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -9,6 +10,9 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.view.WindowInsets
@@ -19,6 +23,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -91,14 +96,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import androidx.core.graphics.toColorInt
 import androidx.core.view.WindowCompat
 import androidx.window.layout.WindowMetricsCalculator
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.outsystems.plugins.barcode.R
 import com.outsystems.plugins.barcode.controller.OSBARCBarcodeAnalyzer
 import com.outsystems.plugins.barcode.controller.OSBARCScanLibraryFactory
 import com.outsystems.plugins.barcode.controller.helper.OSBARCImageHelper
 import com.outsystems.plugins.barcode.controller.helper.OSBARCMLKitHelper
 import com.outsystems.plugins.barcode.controller.helper.OSBARCZXingHelper
+import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCError
 import com.outsystems.plugins.barcode.model.OSBARCScanParameters
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
@@ -147,6 +156,13 @@ class OSBARCScannerActivity : ComponentActivity() {
     private var screenHeight: Dp = 0.dp
     private var screenWidth: Dp = 0.dp
 
+    // Highlight state variables
+    private var detectedBarcodeBox by mutableStateOf<OSBARCBoundingBox?>(null)
+    private var showHighlight by mutableStateOf(false)
+
+    // Store parameters for use in processReadSuccess
+    private lateinit var parameters: OSBARCScanParameters
+
     private data class Point(val x: Float, val y: Float)
 
     companion object {
@@ -168,7 +184,7 @@ class OSBARCScannerActivity : ComponentActivity() {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        val parameters = IntentCompat.getSerializableExtra(intent, SCAN_PARAMETERS, OSBARCScanParameters::class.java)!!
+        parameters = IntentCompat.getSerializableExtra(intent, SCAN_PARAMETERS, OSBARCScanParameters::class.java)!!
 
         // possibly lock orientation, the screen is adaptive by default
         if (parameters.scanOrientation == ORIENTATION_PORTRAIT) {
@@ -391,12 +407,20 @@ class OSBARCScannerActivity : ComponentActivity() {
      * @param height the screen height
      * @param horizontalPadding the horizontal padding for the whole view
      * @param verticalPadding the vertical padding for the whole view
+     * @param detectedBox the bounding box of the detected barcode (optional)
+     * @param showHighlightRect whether to show the highlight rectangle
+     * @param highlightColor the color for the highlight rectangle
+     * @param highlightStrokeWidth the stroke width for the highlight rectangle
      */
     @Composable
     fun ScanScreenAim(
         height: Dp, horizontalPadding: Dp, verticalPadding: Dp,
         isPhone: Boolean,
-        isPortrait: Boolean
+        isPortrait: Boolean,
+        detectedBox: OSBARCBoundingBox? = null,
+        showHighlightRect: Boolean = false,
+        highlightColor: Color = Color.Green,
+        highlightStrokeWidth: Float = 4f
     ) {
 
 
@@ -489,6 +513,21 @@ class OSBARCScannerActivity : ComponentActivity() {
                     Point(aimRight - aimLength, aimTop)
                 )
                 drawPath(aimPath, color = ScanAimWhite, style = Stroke(width = strokeWidth))
+
+                // Draw highlight rectangle around detected barcode
+                if (showHighlightRect && detectedBox != null) {
+                    val highlightPath = Path().apply {
+                        addRect(
+                            Rect(
+                                left = detectedBox.left,
+                                top = detectedBox.top,
+                                right = detectedBox.right,
+                                bottom = detectedBox.bottom
+                            )
+                        )
+                    }
+                    drawPath(highlightPath, color = highlightColor, style = Stroke(width = highlightStrokeWidth))
+                }
             }
         )
     }
@@ -558,7 +597,17 @@ class OSBARCScannerActivity : ComponentActivity() {
                     parameters
                 )
 
-                ScanScreenAim(screenHeight, borderPadding, borderPadding, isPhone, true)
+                ScanScreenAim(
+                    height = screenHeight,
+                    horizontalPadding = borderPadding,
+                    verticalPadding = borderPadding,
+                    isPhone = isPhone,
+                    isPortrait = true,
+                    detectedBox = detectedBarcodeBox,
+                    showHighlightRect = showHighlight && parameters.highlightEnabled,
+                    highlightColor = try { Color(parameters.highlightColor.toColorInt()) } catch (e: Exception) { Color.Green },
+                    highlightStrokeWidth = parameters.highlightStrokeWidth
+                )
             }
 
             Box(
@@ -660,7 +709,17 @@ class OSBARCScannerActivity : ComponentActivity() {
                     parameters
                 )
 
-                ScanScreenAim(screenHeight, NoPadding, borderPadding, isPhone, isPortrait)
+                ScanScreenAim(
+                    height = screenHeight,
+                    horizontalPadding = NoPadding,
+                    verticalPadding = borderPadding,
+                    isPhone = isPhone,
+                    isPortrait = isPortrait,
+                    detectedBox = detectedBarcodeBox,
+                    showHighlightRect = showHighlight && parameters.highlightEnabled,
+                    highlightColor = try { Color(parameters.highlightColor.toColorInt()) } catch (e: Exception) { Color.Green },
+                    highlightStrokeWidth = parameters.highlightStrokeWidth
+                )
 
                 Box(
                     modifier = Modifier
@@ -939,13 +998,49 @@ class OSBARCScannerActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun processReadSuccess(result: OSBARCScanResult) {
+    private fun processReadSuccess(scanResult: OSBARCScanResult) {
         // we only want to process the scan result if scanning is active
         if (isScanning) {
-            val resultIntent = Intent()
-            resultIntent.putExtra(SCAN_RESULT, result)
-            setResult(SCAN_SUCCESS_RESULT_CODE, resultIntent)
-            finish()
+            // Prevent further scanning
+            isScanning = false
+
+            // Show highlight if enabled
+            if (parameters.highlightEnabled) {
+                detectedBarcodeBox = scanResult.boundingBox
+                showHighlight = true
+            }
+
+            // Vibrate if enabled
+            if (parameters.vibrationEnabled) {
+                triggerVibration(parameters.vibrationDuration)
+            }
+
+            // Delay before closing
+            lifecycleScope.launch {
+                delay(parameters.closeDelay)
+                val resultIntent = Intent().apply {
+                    putExtra(SCAN_RESULT, scanResult)
+                }
+                setResult(Activity.RESULT_OK, resultIntent)
+                finish()
+            }
+        }
+    }
+
+    private fun triggerVibration(durationMs: Long) {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(durationMs)
         }
     }
 

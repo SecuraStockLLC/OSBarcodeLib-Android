@@ -10,6 +10,7 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
 import com.outsystems.plugins.barcode.model.OSBARCScannerHint
 
@@ -73,10 +74,28 @@ class OSBARCZXingHelper(private val hint: OSBARCScannerHint?): OSBARCZXingHelper
             val source = RGBLuminanceSource(width, height, pixels)
             val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
             val result = reader.decodeWithState(binaryBitmap)
+
+            // Extract bounding box from result points
+            val boundingBox = result.resultPoints?.let { points ->
+                if (points.isNotEmpty()) {
+                    val xCoords = points.mapNotNull { it?.x }
+                    val yCoords = points.mapNotNull { it?.y }
+                    if (xCoords.isNotEmpty() && yCoords.isNotEmpty()) {
+                        OSBARCBoundingBox(
+                            left = xCoords.minOrNull() ?: 0f,
+                            top = yCoords.minOrNull() ?: 0f,
+                            right = xCoords.maxOrNull() ?: 0f,
+                            bottom = yCoords.maxOrNull() ?: 0f
+                        )
+                    } else null
+                } else null
+            }
+
             onSuccess(
                 OSBARCScanResult(
                     text = result.text,
-                    format = result.barcodeFormat.toOSBARCScannerHint()
+                    format = result.barcodeFormat.toOSBARCScannerHint(),
+                    boundingBox = boundingBox
                 )
             )
         } catch (e: NotFoundException) {
