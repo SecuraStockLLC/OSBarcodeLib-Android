@@ -19,7 +19,8 @@ class OSBARCBarcodeAnalyzer(
     private val scanLibrary: OSBARCScanLibraryInterface,
     private val imageHelper: OSBARCImageHelperInterface,
     private val onBarcodeScanned: (OSBARCScanResult) -> Unit,
-    private val onScanningError: (OSBARCError) -> Unit
+    private val onScanningError: (OSBARCError) -> Unit,
+    private val scanLineEnabled: Boolean = false
 ): ImageAnalysis.Analyzer {
 
     var isPortrait = true
@@ -36,11 +37,21 @@ class OSBARCBarcodeAnalyzer(
      */
     override fun analyze(image: ImageProxy) {
         try {
+            val croppedBitmap = cropBitmap(image.toBitmap())
+            val centerY = croppedBitmap.height / 2f
+
             scanLibrary.scanBarcode(
                 image,
-                cropBitmap(image.toBitmap()),
-                {
-                    onBarcodeScanned(it)
+                croppedBitmap,
+                { result ->
+                    // If scan line mode is enabled, only process barcodes that cross the center line
+                    if (scanLineEnabled && result.boundingBox != null) {
+                        val crossesCenterLine = result.boundingBox.top < centerY && result.boundingBox.bottom > centerY
+                        if (!crossesCenterLine) {
+                            return@scanBarcode
+                        }
+                    }
+                    onBarcodeScanned(result)
                 },
                 {
                     onScanningError(it)

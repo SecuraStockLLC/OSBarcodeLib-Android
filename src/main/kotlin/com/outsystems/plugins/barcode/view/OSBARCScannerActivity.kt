@@ -214,7 +214,8 @@ class OSBARCScannerActivity : ComponentActivity() {
             },
             {
                 processReadError(it)
-            }
+            },
+            scanLineEnabled = parameters.scanLineEnabled
         )
 
         setContent {
@@ -424,7 +425,8 @@ class OSBARCScannerActivity : ComponentActivity() {
         detectedBox: OSBARCBoundingBox? = null,
         showHighlightRect: Boolean = false,
         highlightColor: Color = Color.Green,
-        highlightStrokeWidth: Float = 4f
+        highlightStrokeWidth: Float = 4f,
+        scanLineEnabled: Boolean = false
     ) {
 
 
@@ -518,6 +520,17 @@ class OSBARCScannerActivity : ComponentActivity() {
                 )
                 drawPath(aimPath, color = ScanAimWhite, style = Stroke(width = strokeWidth))
 
+                // Draw red center line when scan line mode is enabled
+                if (scanLineEnabled) {
+                    val centerY = canvasHeight / 2
+                    drawLine(
+                        color = Color.Red,
+                        start = Offset(rectLeft, centerY),
+                        end = Offset(rectLeft + rectWidth, centerY),
+                        strokeWidth = 2f
+                    )
+                }
+
                 // Draw highlight rectangle around detected barcode
                 if (showHighlightRect && detectedBox != null) {
                     val highlightPath = Path().apply {
@@ -610,7 +623,8 @@ class OSBARCScannerActivity : ComponentActivity() {
                     detectedBox = detectedBarcodeBox,
                     showHighlightRect = showHighlight && parameters.highlightEnabled,
                     highlightColor = try { Color(parameters.highlightColor.toColorInt()) } catch (e: Exception) { Color.Green },
-                    highlightStrokeWidth = parameters.highlightStrokeWidth
+                    highlightStrokeWidth = parameters.highlightStrokeWidth,
+                    scanLineEnabled = parameters.scanLineEnabled
                 )
             }
 
@@ -722,7 +736,8 @@ class OSBARCScannerActivity : ComponentActivity() {
                     detectedBox = detectedBarcodeBox,
                     showHighlightRect = showHighlight && parameters.highlightEnabled,
                     highlightColor = try { Color(parameters.highlightColor.toColorInt()) } catch (e: Exception) { Color.Green },
-                    highlightStrokeWidth = parameters.highlightStrokeWidth
+                    highlightStrokeWidth = parameters.highlightStrokeWidth,
+                    scanLineEnabled = parameters.scanLineEnabled
                 )
 
                 Box(

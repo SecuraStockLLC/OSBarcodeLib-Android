@@ -19,5 +19,6 @@ data class OSBARCScanParameters(
     @SerializedName("highlightStrokeWidth") val highlightStrokeWidth: Float = 4f,
     @SerializedName("closeDelay") val closeDelay: Long = 500L,
     @SerializedName("vibrationEnabled") val vibrationEnabled: Boolean = true,
-    @SerializedName("vibrationDuration") val vibrationDuration: Long = 100L
+    @SerializedName("vibrationDuration") val vibrationDuration: Long = 100L,
+    @SerializedName("scanLineEnabled") val scanLineEnabled: Boolean = false
 ) : Serializable
