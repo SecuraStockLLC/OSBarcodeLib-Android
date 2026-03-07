@@ -522,7 +522,7 @@ class OSBARCScannerActivity : ComponentActivity() {
 
                 // Draw red center line when scan line mode is enabled
                 if (scanLineEnabled) {
-                    val centerY = canvasHeight / 2
+                    val centerY = rectTop + (rectHeight / 2)
                     drawLine(
                         color = Color.Red,
                         start = Offset(rectLeft, centerY),
