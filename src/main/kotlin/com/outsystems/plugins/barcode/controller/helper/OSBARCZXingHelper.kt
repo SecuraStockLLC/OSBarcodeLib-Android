@@ -9,6 +9,8 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.Result
+import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
 import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
@@ -27,12 +29,14 @@ class OSBARCZXingHelper(private val hint: OSBARCScannerHint?): OSBARCZXingHelper
 
     private val reader: MultiFormatReader by lazy {
         val format = hint.toZXingBarcodeFormat()
+        val hints = mutableMapOf<DecodeHintType, Any>(
+            DecodeHintType.TRY_HARDER to true
+        )
+        if (format != null) {
+            hints[DecodeHintType.POSSIBLE_FORMATS] = setOf(format)
+        }
         MultiFormatReader().apply {
-            if (format != null) {
-                setHints(
-                    mapOf(DecodeHintType.POSSIBLE_FORMATS to setOf(format))
-                )
-            }
+            setHints(hints)
         }
     }
 
@@ -72,8 +76,7 @@ class OSBARCZXingHelper(private val hint: OSBARCScannerHint?): OSBARCZXingHelper
     ) {
         try {
             val source = RGBLuminanceSource(width, height, pixels)
-            val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
-            val result = reader.decodeWithState(binaryBitmap)
+            val result = decodeWithFallbacks(source)
 
             // Extract bounding box from result points
             val boundingBox = result.resultPoints?.let { points ->
@@ -105,6 +108,25 @@ class OSBARCZXingHelper(private val hint: OSBARCScannerHint?): OSBARCZXingHelper
             e.message?.let { Log.e(LOG_TAG, it) }
             onError()
         }
+    }
+
+    private fun decodeWithFallbacks(source: RGBLuminanceSource): Result {
+        val attempts = listOf(
+            BinaryBitmap(HybridBinarizer(source)),
+            BinaryBitmap(GlobalHistogramBinarizer(source)),
+            BinaryBitmap(HybridBinarizer(source.invert())),
+            BinaryBitmap(GlobalHistogramBinarizer(source.invert()))
+        )
+
+        for (bitmap in attempts) {
+            try {
+                return reader.decodeWithState(bitmap)
+            } catch (_: NotFoundException) {
+                reader.reset()
+            }
+        }
+
+        throw NotFoundException.getNotFoundInstance()
     }
 
     private fun OSBARCScannerHint?.toZXingBarcodeFormat(): BarcodeFormat? = when (this) {
