@@ -515,6 +515,68 @@ class ScanCodeTests {
     }
 
     @Test
+    fun givenThinBoundingBoxSlightlyAboveCenterWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 300f, 220f, 306f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
+    }
+
+    @Test
+    fun givenOneDimensionalBoundingBoxCrossesCenterButCenterOffsetWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 313f, 220f, 321f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
+    }
+
+    @Test
     fun givenImage90DegreesWhenZXingScanThenSuccess() {
         val wrapper = OSBARCScanLibraryFactory.createScanLibraryWrapper(
             "zxing",

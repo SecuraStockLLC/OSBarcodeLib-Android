@@ -95,6 +95,7 @@ import androidx.core.content.IntentCompat
 import androidx.core.graphics.toColorInt
 import androidx.core.view.WindowCompat
 import androidx.window.layout.WindowMetricsCalculator
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.outsystems.plugins.barcode.R
@@ -107,6 +108,7 @@ import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCError
 import com.outsystems.plugins.barcode.model.OSBARCScanParameters
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
+import com.outsystems.plugins.barcode.model.OSBARCScannerHint
 import com.outsystems.plugins.barcode.view.ui.theme.ActionButtonsDistance
 import com.outsystems.plugins.barcode.view.ui.theme.BarcodeScannerTheme
 import com.outsystems.plugins.barcode.view.ui.theme.ButtonsBackgroundGray
@@ -140,11 +142,21 @@ import kotlin.math.roundToInt
  * implements the ImageAnalysis.Analyzer interface.
  */
 class OSBARCScannerActivity : ComponentActivity() {
+    private enum class ScanSessionState {
+        ACTIVE_SCANNING,
+        POST_SCAN_TRACKING,
+        CLOSING
+    }
+
     private var camera: Camera? = null
     private lateinit var selector: CameraSelector
     private var permissionRequestCount = 0
     private var showDialog by mutableStateOf(false)
     private var isScanning = false
+    private var scanSessionState = ScanSessionState.ACTIVE_SCANNING
+    private var lockedScanKey: String? = null
+    private var finalScanResult: OSBARCScanResult? = null
+    private var closeJob: Job? = null
     private lateinit var cameraExecutor: ExecutorService
 
     private lateinit var barcodeAnalyzer: OSBARCBarcodeAnalyzer
@@ -162,6 +174,9 @@ class OSBARCScannerActivity : ComponentActivity() {
 
     private data class Point(val x: Float, val y: Float)
     private data class ScanAimMetrics(
+        val canvasWidth: Float,
+        val canvasHeight: Float,
+        val cornerPaddingPx: Float,
         val rectLeft: Float,
         val rectTop: Float,
         val rectWidth: Float,
@@ -176,6 +191,48 @@ class OSBARCScannerActivity : ComponentActivity() {
         private const val CAM_DIRECTION_FRONT = 2
         private const val ORIENTATION_PORTRAIT = 1
         private const val ORIENTATION_LANDSCAPE = 2
+        private const val ONE_D_WIDTH_SCALE = 1.2f
+
+        internal fun buildScanLockKey(scanResult: OSBARCScanResult): String {
+            return "${scanResult.format}|${scanResult.text}"
+        }
+
+        internal fun isScanLockMatch(scanResult: OSBARCScanResult, lockKey: String?): Boolean {
+            return lockKey != null && lockKey == buildScanLockKey(scanResult)
+        }
+
+        internal fun isOneDimensionalFormat(format: OSBARCScannerHint): Boolean {
+            return when (format) {
+                OSBARCScannerHint.CODABAR,
+                OSBARCScannerHint.CODE_39,
+                OSBARCScannerHint.CODE_93,
+                OSBARCScannerHint.CODE_128,
+                OSBARCScannerHint.ITF,
+                OSBARCScannerHint.EAN_13,
+                OSBARCScannerHint.EAN_8,
+                OSBARCScannerHint.RSS_14,
+                OSBARCScannerHint.RSS_EXPANDED,
+                OSBARCScannerHint.UPC_A,
+                OSBARCScannerHint.UPC_E,
+                OSBARCScannerHint.UPC_EAN_EXTENSION -> true
+                else -> false
+            }
+        }
+
+        internal fun widenOneDimensionalBox(
+            box: OSBARCBoundingBox,
+            widthScale: Float = ONE_D_WIDTH_SCALE
+        ): OSBARCBoundingBox {
+            if (widthScale <= 1f) {
+                return box
+            }
+            val centerX = (box.left + box.right) / 2f
+            val halfWidth = ((box.right - box.left) / 2f) * widthScale
+            return box.copy(
+                left = centerX - halfWidth,
+                right = centerX + halfWidth
+            )
+        }
     }
 
     /**
@@ -197,6 +254,11 @@ class OSBARCScannerActivity : ComponentActivity() {
         }
 
         isScanning = !parameters.scanButton
+        scanSessionState = ScanSessionState.ACTIVE_SCANNING
+        lockedScanKey = null
+        finalScanResult = null
+        closeJob?.cancel()
+        closeJob = null
         selector = CameraSelector.Builder()
             .requireLensFacing(if (parameters.cameraDirection == CAM_DIRECTION_FRONT) CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
             .build()
@@ -242,6 +304,7 @@ class OSBARCScannerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        closeJob?.cancel()
         cameraExecutor.shutdown()
     }
 
@@ -579,6 +642,9 @@ class OSBARCScannerActivity : ComponentActivity() {
         }
 
         return ScanAimMetrics(
+            canvasWidth = canvasWidth,
+            canvasHeight = canvasHeight,
+            cornerPaddingPx = cornerPaddingPx,
             rectLeft = (canvasWidth - rectWidth) / 2f,
             rectTop = (canvasHeight - rectHeight) / 2f,
             rectWidth = rectWidth,
@@ -877,12 +943,15 @@ class OSBARCScannerActivity : ComponentActivity() {
      */
     @Composable
     fun ScanButton(modifier: Modifier, scanButtonText: String) {
-        var scanning by remember { mutableStateOf(false) }
+        var scanning by remember { mutableStateOf(isScanning) }
         val backgroundColor = if (scanning) ButtonsBackgroundWhite else ButtonsBackgroundGray
         val textColor = if (scanning) ButtonsTextGray else ButtonsTextWhite
 
         Button(
             onClick = {
+                if (scanSessionState != ScanSessionState.ACTIVE_SCANNING) {
+                    return@Button
+                }
                 isScanning = !isScanning
                 scanning = !scanning
             },
@@ -1043,32 +1112,63 @@ class OSBARCScannerActivity : ComponentActivity() {
     }
 
     private fun processReadSuccess(scanResult: OSBARCScanResult) {
-        // we only want to process the scan result if scanning is active
-        if (isScanning) {
-            // Prevent further scanning
-            isScanning = false
-
-            // Show highlight if enabled
-            if (parameters.highlightEnabled && scanResult.boundingBox != null) {
-                // Transform bounding box from cropped bitmap coords to screen coords
-                detectedBarcodeBox = transformBoundingBoxToScreen(scanResult.boundingBox)
-                showHighlight = detectedBarcodeBox != null
-            }
-
-            // Vibrate if enabled
-            if (parameters.vibrationEnabled) {
-                triggerVibration(parameters.vibrationDuration)
-            }
-
-            // Delay before closing
-            lifecycleScope.launch {
-                delay(parameters.closeDelay)
-                val resultIntent = Intent().apply {
-                    putExtra(SCAN_RESULT, scanResult)
+        when (scanSessionState) {
+            ScanSessionState.ACTIVE_SCANNING -> {
+                if (!isScanning) {
+                    return
                 }
-                setResult(Activity.RESULT_OK, resultIntent)
-                finish()
+
+                lockedScanKey = buildScanLockKey(scanResult)
+                finalScanResult = scanResult
+
+                if (parameters.highlightEnabled) {
+                    updateTrackedHighlight(scanResult)
+                }
+
+                if (parameters.vibrationEnabled) {
+                    triggerVibration(parameters.vibrationDuration)
+                }
+
+                scanSessionState = ScanSessionState.POST_SCAN_TRACKING
+                scheduleAutoClose()
             }
+
+            ScanSessionState.POST_SCAN_TRACKING -> {
+                if (!isScanLockMatch(scanResult, lockedScanKey)) {
+                    return
+                }
+                if (parameters.highlightEnabled) {
+                    updateTrackedHighlight(scanResult)
+                }
+            }
+
+            ScanSessionState.CLOSING -> {
+                return
+            }
+        }
+    }
+
+    private fun updateTrackedHighlight(scanResult: OSBARCScanResult) {
+        if (scanResult.boundingBox == null) {
+            return
+        }
+        detectedBarcodeBox = transformBoundingBoxToScreen(scanResult)
+        if (detectedBarcodeBox != null) {
+            showHighlight = true
+        }
+    }
+
+    private fun scheduleAutoClose() {
+        closeJob?.cancel()
+        closeJob = lifecycleScope.launch {
+            delay(parameters.closeDelay)
+            val result = finalScanResult ?: return@launch
+            scanSessionState = ScanSessionState.CLOSING
+            val resultIntent = Intent().apply {
+                putExtra(SCAN_RESULT, result)
+            }
+            setResult(Activity.RESULT_OK, resultIntent)
+            finish()
         }
     }
 
@@ -1090,8 +1190,8 @@ class OSBARCScannerActivity : ComponentActivity() {
     }
 
     private fun processReadError(error: OSBARCError) {
-        // we only want to process the scan error if scanning is active
-        if (isScanning) {
+        // only fail immediately while actively scanning
+        if (scanSessionState == ScanSessionState.ACTIVE_SCANNING && isScanning) {
             setResult(error.code)
             finish()
         }
@@ -1107,7 +1207,8 @@ class OSBARCScannerActivity : ComponentActivity() {
      * The Canvas draws the highlight, so coordinates need to be in Canvas space.
      * The Canvas fills the scanning area with specific dimensions.
      */
-    private fun transformBoundingBoxToScreen(boundingBox: OSBARCBoundingBox): OSBARCBoundingBox? {
+    private fun transformBoundingBoxToScreen(scanResult: OSBARCScanResult): OSBARCBoundingBox? {
+        val boundingBox = scanResult.boundingBox ?: return null
         val scanAimMetrics = lastScanAimMetrics ?: return null
         val croppedWidth = barcodeAnalyzer.lastCropWidthPx
         val croppedHeight = barcodeAnalyzer.lastCropHeightPx
@@ -1116,15 +1217,38 @@ class OSBARCScannerActivity : ComponentActivity() {
             return null
         }
 
-        val scaleX = scanAimMetrics.rectWidth / croppedWidth
-        val scaleY = scanAimMetrics.rectHeight / croppedHeight
+        // Analyzer crop is slightly larger than the transparent frame. Project to aim area + corner padding.
+        val mappedLeft = scanAimMetrics.rectLeft - scanAimMetrics.cornerPaddingPx
+        val mappedTop = scanAimMetrics.rectTop - scanAimMetrics.cornerPaddingPx
+        val mappedWidth = scanAimMetrics.rectWidth + (scanAimMetrics.cornerPaddingPx * 2f)
+        val mappedHeight = scanAimMetrics.rectHeight + (scanAimMetrics.cornerPaddingPx * 2f)
 
-        return OSBARCBoundingBox(
-            left = scanAimMetrics.rectLeft + (boundingBox.left * scaleX),
-            top = scanAimMetrics.rectTop + (boundingBox.top * scaleY),
-            right = scanAimMetrics.rectLeft + (boundingBox.right * scaleX),
-            bottom = scanAimMetrics.rectTop + (boundingBox.bottom * scaleY)
+        val scaleX = mappedWidth / croppedWidth
+        val scaleY = mappedHeight / croppedHeight
+
+        var mappedBox = OSBARCBoundingBox(
+            left = mappedLeft + (boundingBox.left * scaleX),
+            top = mappedTop + (boundingBox.top * scaleY),
+            right = mappedLeft + (boundingBox.right * scaleX),
+            bottom = mappedTop + (boundingBox.bottom * scaleY)
         )
+
+        if (isOneDimensionalFormat(scanResult.format)) {
+            mappedBox = widenOneDimensionalBox(mappedBox)
+        }
+
+        val clamped = OSBARCBoundingBox(
+            left = mappedBox.left.coerceIn(0f, scanAimMetrics.canvasWidth),
+            top = mappedBox.top.coerceIn(0f, scanAimMetrics.canvasHeight),
+            right = mappedBox.right.coerceIn(0f, scanAimMetrics.canvasWidth),
+            bottom = mappedBox.bottom.coerceIn(0f, scanAimMetrics.canvasHeight)
+        )
+
+        if (clamped.right <= clamped.left || clamped.bottom <= clamped.top) {
+            return null
+        }
+
+        return clamped
     }
 
     private fun makeViewFullscreen() {

@@ -5,14 +5,15 @@ import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.outsystems.plugins.barcode.controller.helper.OSBARCImageHelperInterface
-import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCError
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
+import com.outsystems.plugins.barcode.model.OSBARCScannerHint
 import com.outsystems.plugins.barcode.view.ui.theme.SizeRatioHeight
 import com.outsystems.plugins.barcode.view.ui.theme.SizeRatioWidth
 import java.lang.Exception
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * This class is responsible for implementing the ImageAnalysis.Analyzer interface,
@@ -34,8 +35,12 @@ class OSBARCBarcodeAnalyzer(
 
     companion object {
         private const val LOG_TAG = "OSBARCBarcodeAnalyzer"
-        private const val SCAN_LINE_TOLERANCE_RATIO = 0.08f
-        private const val MIN_SCAN_LINE_TOLERANCE_PX = 24f
+        private const val SCAN_LINE_TOLERANCE_RATIO = 0.015f
+        private const val MIN_SCAN_LINE_TOLERANCE_PX = 5f
+        private const val MAX_SCAN_LINE_TOLERANCE_PX = 12f
+        private const val ONE_D_SCAN_LINE_TOLERANCE_RATIO = 0.0045f
+        private const val ONE_D_MIN_SCAN_LINE_TOLERANCE_PX = 2f
+        private const val ONE_D_MAX_SCAN_LINE_TOLERANCE_PX = 4f
     }
 
     /**
@@ -57,7 +62,7 @@ class OSBARCBarcodeAnalyzer(
                 { result ->
                     // If scan line mode is enabled, only process barcodes that cross the center line
                     if (scanLineEnabled && result.boundingBox != null) {
-                        if (!matchesScanLine(result.boundingBox, centerY, lastCropHeightPx)) {
+                        if (!matchesScanLine(result, centerY, lastCropHeightPx)) {
                             return@scanBarcode
                         }
                     }
@@ -75,19 +80,49 @@ class OSBARCBarcodeAnalyzer(
     }
 
     private fun matchesScanLine(
-        boundingBox: OSBARCBoundingBox,
+        scanResult: OSBARCScanResult,
         centerY: Float,
         imageHeight: Float
     ): Boolean {
-        val tolerancePx = max(imageHeight * SCAN_LINE_TOLERANCE_RATIO, MIN_SCAN_LINE_TOLERANCE_PX)
-        val boxHeight = abs(boundingBox.bottom - boundingBox.top)
+        val boundingBox = scanResult.boundingBox ?: return true
+        val boxTop = min(boundingBox.top, boundingBox.bottom)
+        val boxBottom = max(boundingBox.top, boundingBox.bottom)
+        val boxHeight = abs(boxBottom - boxTop)
 
-        if (boxHeight <= tolerancePx) {
-            val boxCenterY = (boundingBox.top + boundingBox.bottom) / 2f
+        if (isOneDimensionalFormat(scanResult.format)) {
+            val tolerancePx = (imageHeight * ONE_D_SCAN_LINE_TOLERANCE_RATIO)
+                .coerceIn(ONE_D_MIN_SCAN_LINE_TOLERANCE_PX, ONE_D_MAX_SCAN_LINE_TOLERANCE_PX)
+            val boxCenterY = (boxTop + boxBottom) / 2f
             return abs(boxCenterY - centerY) <= tolerancePx
         }
 
-        return boundingBox.top <= centerY && boundingBox.bottom >= centerY
+        val tolerancePx = (imageHeight * SCAN_LINE_TOLERANCE_RATIO)
+            .coerceIn(MIN_SCAN_LINE_TOLERANCE_PX, MAX_SCAN_LINE_TOLERANCE_PX)
+
+        if (boxHeight <= tolerancePx) {
+            val boxCenterY = (boxTop + boxBottom) / 2f
+            return abs(boxCenterY - centerY) <= tolerancePx
+        }
+
+        return boxTop <= centerY && boxBottom >= centerY
+    }
+
+    private fun isOneDimensionalFormat(format: OSBARCScannerHint): Boolean {
+        return when (format) {
+            OSBARCScannerHint.CODABAR,
+            OSBARCScannerHint.CODE_39,
+            OSBARCScannerHint.CODE_93,
+            OSBARCScannerHint.CODE_128,
+            OSBARCScannerHint.ITF,
+            OSBARCScannerHint.EAN_13,
+            OSBARCScannerHint.EAN_8,
+            OSBARCScannerHint.RSS_14,
+            OSBARCScannerHint.RSS_EXPANDED,
+            OSBARCScannerHint.UPC_A,
+            OSBARCScannerHint.UPC_E,
+            OSBARCScannerHint.UPC_EAN_EXTENSION -> true
+            else -> false
+        }
     }
 
     /**
