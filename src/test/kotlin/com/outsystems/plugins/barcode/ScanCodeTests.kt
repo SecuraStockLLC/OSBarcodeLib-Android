@@ -463,7 +463,7 @@ class ScanCodeTests {
             resultCode = OSBARCScanResult(
                 "myCode",
                 OSBARCScannerHint.CODE_128,
-                OSBARCBoundingBox(10f, 315f, 220f, 321f)
+                OSBARCBoundingBox(10f, 319f, 220f, 325f)
             )
         }
         Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
@@ -546,12 +546,43 @@ class ScanCodeTests {
     }
 
     @Test
-    fun givenOneDimensionalBoundingBoxCrossesCenterButCenterOffsetWhenScanLineEnabledThenIgnoreResult() {
+    fun givenCode128JustOffCenterLineWhenScanLineEnabledThenIgnoreResult() {
         val scanLibMock = OSBARCScanLibraryMock().apply {
             success = true
             resultCode = OSBARCScanResult(
                 "myCode",
                 OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 323f, 220f, 329f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
+    }
+
+    @Test
+    fun givenOneDimensionalBoundingBoxCrossesCenterButCenterOffsetWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_39,
                 OSBARCBoundingBox(10f, 313f, 220f, 321f)
             )
         }
@@ -613,6 +644,66 @@ class ScanCodeTests {
             mockBitmap,
             {
                 assertEquals(SCAN_RESULT, it)
+            },
+            {
+                fail()
+            }
+        )
+    }
+
+    @Test
+    fun givenImage90DegreesAndBoundingBoxWhenZXingScanThenBoundingBoxMappedToSourceOrientation() {
+        val wrapper = OSBARCScanLibraryFactory.createScanLibraryWrapper(
+            "zxing",
+            OSBARCZXingHelperMock().apply {
+                scanResult = OSBARCScanResult(
+                    "myCode",
+                    OSBARCScannerHint.CODE_128,
+                    OSBARCBoundingBox(100f, 120f, 220f, 160f)
+                )
+            },
+            OSBARCMLKitHelperMock()
+        )
+
+        Mockito.doReturn(90).`when`(mockImageInfo).rotationDegrees
+        Mockito.doReturn(360).`when`(mockBitmap).width
+        Mockito.doReturn(640).`when`(mockBitmap).height
+
+        wrapper.scanBarcode(
+            mockImageProxy,
+            mockBitmap,
+            {
+                assertEquals(OSBARCBoundingBox(120f, 420f, 160f, 540f), it.boundingBox)
+            },
+            {
+                fail()
+            }
+        )
+    }
+
+    @Test
+    fun givenImage270DegreesAndBoundingBoxWhenZXingScanThenBoundingBoxMappedToSourceOrientation() {
+        val wrapper = OSBARCScanLibraryFactory.createScanLibraryWrapper(
+            "zxing",
+            OSBARCZXingHelperMock().apply {
+                scanResult = OSBARCScanResult(
+                    "myCode",
+                    OSBARCScannerHint.CODE_128,
+                    OSBARCBoundingBox(100f, 120f, 220f, 160f)
+                )
+            },
+            OSBARCMLKitHelperMock()
+        )
+
+        Mockito.doReturn(270).`when`(mockImageInfo).rotationDegrees
+        Mockito.doReturn(360).`when`(mockBitmap).width
+        Mockito.doReturn(640).`when`(mockBitmap).height
+
+        wrapper.scanBarcode(
+            mockImageProxy,
+            mockBitmap,
+            {
+                assertEquals(OSBARCBoundingBox(200f, 100f, 240f, 220f), it.boundingBox)
             },
             {
                 fail()
