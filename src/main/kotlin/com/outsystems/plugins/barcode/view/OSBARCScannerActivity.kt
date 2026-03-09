@@ -85,10 +85,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.toComposeRect
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -257,8 +253,8 @@ class OSBARCScannerActivity : ComponentActivity() {
      */
     @Composable
     fun ScanScreen(parameters: OSBARCScanParameters, windowSizeClass: WindowSizeClass) {
-        val lifecycleOwner = LocalLifecycleOwner.current
-        val context = LocalContext.current
+        val lifecycleOwner = this@OSBARCScannerActivity
+        val context = this@OSBARCScannerActivity
         var permissionGiven by remember { mutableStateOf(true) }
         var uiState by remember { mutableStateOf(OSBARCScannerUiState.DEFAULT) }
 
@@ -381,14 +377,13 @@ class OSBARCScannerActivity : ComponentActivity() {
         uiState: OSBARCScannerUiState
     ) {
         // actual UI on top of the camera stream
-        val configuration = LocalConfiguration.current
+        val configuration = resources.configuration
         val windowMetrics =
             WindowMetricsCalculator.getOrCreate().computeCurrentWindowMetrics(this)
         val rect = windowMetrics.bounds.toComposeRect()
-        with(LocalDensity.current) {
-            screenHeight = rect.height.toDp()
-            screenWidth = rect.width.toDp()
-        }
+        val density = resources.displayMetrics.density
+        screenHeight = (rect.height / density).dp
+        screenWidth = (rect.width / density).dp
 
         val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
 
@@ -717,7 +712,7 @@ class OSBARCScannerActivity : ComponentActivity() {
                               isPortrait: Boolean,
                               uiState: OSBARCScannerUiState) {
         var rightButtonsWidth by remember { mutableStateOf(0.dp) }
-        val density = LocalDensity.current
+        val density = resources.displayMetrics.density
 
         Row(
             modifier = Modifier
@@ -783,7 +778,7 @@ class OSBARCScannerActivity : ComponentActivity() {
                 modifier = Modifier
                     .fillMaxHeight()
                     .onGloballyPositioned { coordinates ->
-                        rightButtonsWidth = with(density) { coordinates.size.width.toDp() }
+                        rightButtonsWidth = (coordinates.size.width / density).dp
                     }
                     .background(ScannerBackgroundBlack)
                     .safeDrawingPadding()
