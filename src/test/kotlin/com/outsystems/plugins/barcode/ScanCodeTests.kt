@@ -11,16 +11,17 @@ import androidx.core.content.IntentCompat
 import com.outsystems.plugins.barcode.controller.OSBARCBarcodeAnalyzer
 import com.outsystems.plugins.barcode.controller.OSBARCController
 import com.outsystems.plugins.barcode.controller.OSBARCScanLibraryFactory
-import com.outsystems.plugins.barcode.controller.helper.OSBARCImageHelperInterface
 import com.outsystems.plugins.barcode.mocks.OSBARCImageHelperMock
 import com.outsystems.plugins.barcode.mocks.OSBARCMLKitHelperMock
 import com.outsystems.plugins.barcode.mocks.OSBARCZXingHelperMock
 import com.outsystems.plugins.barcode.mocks.OSBARCScanLibraryMock
+import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCError
 import com.outsystems.plugins.barcode.model.OSBARCScanParameters
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
 import com.outsystems.plugins.barcode.model.OSBARCScannerHint
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Before
@@ -42,7 +43,7 @@ class ScanCodeTests {
     private lateinit var planes: Array<ImageProxy.PlaneProxy>
     private lateinit var mockIntentCompat: MockedStatic<IntentCompat>
 
-    private lateinit var imageHelperMock: OSBARCImageHelperInterface
+    private lateinit var imageHelperMock: OSBARCImageHelperMock
     private lateinit var mockBitmap: Bitmap
 
     companion object {
@@ -73,6 +74,7 @@ class ScanCodeTests {
 
         imageHelperMock = OSBARCImageHelperMock()
         mockBitmap = Mockito.mock(Bitmap::class.java)
+        imageHelperMock.subsetBitmap = Mockito.mock(Bitmap::class.java)
         mockIntentCompat = Mockito.mockStatic(IntentCompat::class.java)
     }
 
@@ -452,6 +454,64 @@ class ScanCodeTests {
         ).apply {
             isPortrait = false
         }.analyze(mockImageProxy)
+    }
+
+    @Test
+    fun givenThinBoundingBoxNearCenterWhenScanLineEnabledThenSuccess() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 315f, 220f, 321f)
+            )
+        }
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                assertEquals(scanLibMock.resultCode, it)
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+    }
+
+    @Test
+    fun givenThinBoundingBoxAwayFromCenterWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 40f, 220f, 46f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
     }
 
     @Test

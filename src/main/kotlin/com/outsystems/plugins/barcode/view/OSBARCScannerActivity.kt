@@ -159,11 +159,18 @@ class OSBARCScannerActivity : ComponentActivity() {
     // Highlight state variables
     private var detectedBarcodeBox by mutableStateOf<OSBARCBoundingBox?>(null)
     private var showHighlight by mutableStateOf(false)
+    private var lastScanAimMetrics: ScanAimMetrics? = null
 
     // Store parameters for use in processReadSuccess
     private lateinit var parameters: OSBARCScanParameters
 
     private data class Point(val x: Float, val y: Float)
+    private data class ScanAimMetrics(
+        val rectLeft: Float,
+        val rectTop: Float,
+        val rectWidth: Float,
+        val rectHeight: Float
+    )
 
     companion object {
         private const val SCAN_SUCCESS_RESULT_CODE = -1
@@ -437,28 +444,23 @@ class OSBARCScannerActivity : ComponentActivity() {
                 .height(height)
             ,
             onDraw = {
-
                 val radius = 25f
-                val canvasWidth = size.width
-                val canvasHeight = size.height
-
-                // rectangle size is determined by removing the padding from the border of the screen
-                // and the padding to the corners of the rectangle
-                var rectWidth: Float = canvasWidth - (ScannerAimRectCornerPadding.toPx() * 2)
-                var rectHeight: Float = canvasHeight - (verticalPadding.toPx() * 2) - (ScannerAimRectCornerPadding.toPx() * 2)
-
-                if (isPhone) { // for phones
-                    if (isPortrait) {
-                        rectWidth = canvasWidth - (horizontalPadding.toPx() * 2) - (ScannerAimRectCornerPadding.toPx() * 2)
-                    }
-                } else { // for tablets
-                    rectHeight = minOf(rectWidth, canvasHeight - (ScannerAimRectCornerPadding.toPx() * 2))
-                }
-
-                val rectLeft = (canvasWidth - rectWidth) / 2
-                val rectTop = (canvasHeight - rectHeight) / 2
+                val scanAimMetrics = calculateScanAimMetrics(
+                    canvasWidth = size.width,
+                    canvasHeight = size.height,
+                    cornerPaddingPx = ScannerAimRectCornerPadding.toPx(),
+                    horizontalPaddingPx = horizontalPadding.toPx(),
+                    verticalPaddingPx = verticalPadding.toPx(),
+                    isPhone = isPhone,
+                    isPortrait = isPortrait
+                )
+                val rectLeft = scanAimMetrics.rectLeft
+                val rectTop = scanAimMetrics.rectTop
+                val rectWidth = scanAimMetrics.rectWidth
+                val rectHeight = scanAimMetrics.rectHeight
 
                 barcodeAnalyzer.isPortrait = isPortrait
+                lastScanAimMetrics = scanAimMetrics
 
                 val circlePath = Path().apply {
                     addRoundRect(
@@ -559,6 +561,34 @@ class OSBARCScannerActivity : ComponentActivity() {
         path.lineTo(startCornerPoint.x, startCornerPoint.y)
         path.quadraticBezierTo(controlPoint.x, controlPoint.y, endCornerPoint.x, endCornerPoint.y)
         path.lineTo(endPoint.x, endPoint.y)
+    }
+
+    private fun calculateScanAimMetrics(
+        canvasWidth: Float,
+        canvasHeight: Float,
+        cornerPaddingPx: Float,
+        horizontalPaddingPx: Float,
+        verticalPaddingPx: Float,
+        isPhone: Boolean,
+        isPortrait: Boolean
+    ): ScanAimMetrics {
+        var rectWidth = canvasWidth - (cornerPaddingPx * 2)
+        var rectHeight = canvasHeight - (verticalPaddingPx * 2) - (cornerPaddingPx * 2)
+
+        if (isPhone) {
+            if (isPortrait) {
+                rectWidth = canvasWidth - (horizontalPaddingPx * 2) - (cornerPaddingPx * 2)
+            }
+        } else {
+            rectHeight = minOf(rectWidth, canvasHeight - (cornerPaddingPx * 2))
+        }
+
+        return ScanAimMetrics(
+            rectLeft = (canvasWidth - rectWidth) / 2f,
+            rectTop = (canvasHeight - rectHeight) / 2f,
+            rectWidth = rectWidth,
+            rectHeight = rectHeight
+        )
     }
 
     /**
@@ -1027,7 +1057,7 @@ class OSBARCScannerActivity : ComponentActivity() {
             if (parameters.highlightEnabled && scanResult.boundingBox != null) {
                 // Transform bounding box from cropped bitmap coords to screen coords
                 detectedBarcodeBox = transformBoundingBoxToScreen(scanResult.boundingBox)
-                showHighlight = true
+                showHighlight = detectedBarcodeBox != null
             }
 
             // Vibrate if enabled
@@ -1082,76 +1112,23 @@ class OSBARCScannerActivity : ComponentActivity() {
      * The Canvas draws the highlight, so coordinates need to be in Canvas space.
      * The Canvas fills the scanning area with specific dimensions.
      */
-    private fun transformBoundingBoxToScreen(boundingBox: OSBARCBoundingBox): OSBARCBoundingBox {
-        // Get screen dimensions in pixels
-        val density = resources.displayMetrics.density
-        val screenWidthPx = screenWidth.value * density
-        val screenHeightPx = screenHeight.value * density
+    private fun transformBoundingBoxToScreen(boundingBox: OSBARCBoundingBox): OSBARCBoundingBox? {
+        val scanAimMetrics = lastScanAimMetrics ?: return null
+        val croppedWidth = barcodeAnalyzer.lastCropWidthPx
+        val croppedHeight = barcodeAnalyzer.lastCropHeightPx
 
-        // Padding values (matching ScanScreenAim calculation)
-        val borderPadding = 32f * density  // ScannerBorderPadding
-        val cornerPadding = 16f * density  // ScannerAimRectCornerPadding
-
-        // Calculate Canvas dimensions (matching ScanScreenAim logic)
-        val canvasWidth: Float
-        val canvasHeight: Float
-
-        if (barcodeAnalyzer.isPortrait) {
-            // Portrait: canvas is screenWidth wide, and scanning rect is square
-            canvasWidth = screenWidthPx
-            canvasHeight = screenWidthPx  // Square scanning area for phones in portrait
-        } else {
-            // Landscape: canvas fills available space
-            canvasWidth = screenWidthPx
-            canvasHeight = screenHeightPx
+        if (croppedWidth <= 0f || croppedHeight <= 0f) {
+            return null
         }
 
-        // Calculate the actual scanning rectangle within the canvas
-        // This matches the calculation in ScanScreenAim onDraw
-        val rectWidth: Float
-        val rectHeight: Float
+        val scaleX = scanAimMetrics.rectWidth / croppedWidth
+        val scaleY = scanAimMetrics.rectHeight / croppedHeight
 
-        if (barcodeAnalyzer.isPortrait) {
-            rectWidth = canvasWidth - (borderPadding * 2) - (cornerPadding * 2)
-            rectHeight = rectWidth  // Square
-        } else {
-            rectWidth = canvasWidth - (cornerPadding * 2)
-            rectHeight = canvasHeight - (borderPadding * 2) - (cornerPadding * 2)
-        }
-
-        val rectLeft = (canvasWidth - rectWidth) / 2
-        val rectTop = (canvasHeight - rectHeight) / 2
-
-        // The cropped bitmap dimensions (from cropBitmap in OSBARCBarcodeAnalyzer)
-        // Camera resolution is 1920x1080, but in portrait the image is rotated
-        val cameraWidth = if (barcodeAnalyzer.isPortrait) 1080f else 1920f
-        val cameraHeight = if (barcodeAnalyzer.isPortrait) 1920f else 1080f
-
-        // Crop ratios from Sizes.kt
-        val cropRatioWidth = 0.6f
-        val cropRatioHeight = if (barcodeAnalyzer.isPortrait) cropRatioWidth else 0.5f
-
-        val croppedWidth = if (barcodeAnalyzer.isPortrait) {
-            cameraHeight * cropRatioWidth  // In portrait, width comes from height due to rotation
-        } else {
-            cameraWidth * cropRatioWidth
-        }
-        val croppedHeight = if (barcodeAnalyzer.isPortrait) {
-            croppedWidth  // Square crop in portrait
-        } else {
-            cameraHeight * cropRatioHeight
-        }
-
-        // Scale from cropped bitmap to scanning rectangle
-        val scaleX = rectWidth / croppedWidth
-        val scaleY = rectHeight / croppedHeight
-
-        // Transform coordinates
         return OSBARCBoundingBox(
-            left = rectLeft + (boundingBox.left * scaleX),
-            top = rectTop + (boundingBox.top * scaleY),
-            right = rectLeft + (boundingBox.right * scaleX),
-            bottom = rectTop + (boundingBox.bottom * scaleY)
+            left = scanAimMetrics.rectLeft + (boundingBox.left * scaleX),
+            top = scanAimMetrics.rectTop + (boundingBox.top * scaleY),
+            right = scanAimMetrics.rectLeft + (boundingBox.right * scaleX),
+            bottom = scanAimMetrics.rectTop + (boundingBox.bottom * scaleY)
         )
     }
 

@@ -5,11 +5,14 @@ import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.outsystems.plugins.barcode.controller.helper.OSBARCImageHelperInterface
+import com.outsystems.plugins.barcode.model.OSBARCBoundingBox
 import com.outsystems.plugins.barcode.model.OSBARCError
 import com.outsystems.plugins.barcode.model.OSBARCScanResult
 import com.outsystems.plugins.barcode.view.ui.theme.SizeRatioHeight
 import com.outsystems.plugins.barcode.view.ui.theme.SizeRatioWidth
 import java.lang.Exception
+import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * This class is responsible for implementing the ImageAnalysis.Analyzer interface,
@@ -24,9 +27,15 @@ class OSBARCBarcodeAnalyzer(
 ): ImageAnalysis.Analyzer {
 
     var isPortrait = true
+    var lastCropWidthPx = 0f
+        private set
+    var lastCropHeightPx = 0f
+        private set
 
     companion object {
         private const val LOG_TAG = "OSBARCBarcodeAnalyzer"
+        private const val SCAN_LINE_TOLERANCE_RATIO = 0.08f
+        private const val MIN_SCAN_LINE_TOLERANCE_PX = 24f
     }
 
     /**
@@ -38,7 +47,9 @@ class OSBARCBarcodeAnalyzer(
     override fun analyze(image: ImageProxy) {
         try {
             val croppedBitmap = cropBitmap(image.toBitmap())
-            val centerY = croppedBitmap.height / 2f
+            lastCropWidthPx = croppedBitmap.width.toFloat()
+            lastCropHeightPx = croppedBitmap.height.toFloat()
+            val centerY = lastCropHeightPx / 2f
 
             scanLibrary.scanBarcode(
                 image,
@@ -46,8 +57,7 @@ class OSBARCBarcodeAnalyzer(
                 { result ->
                     // If scan line mode is enabled, only process barcodes that cross the center line
                     if (scanLineEnabled && result.boundingBox != null) {
-                        val crossesCenterLine = result.boundingBox.top < centerY && result.boundingBox.bottom > centerY
-                        if (!crossesCenterLine) {
+                        if (!matchesScanLine(result.boundingBox, centerY, lastCropHeightPx)) {
                             return@scanBarcode
                         }
                     }
@@ -62,6 +72,22 @@ class OSBARCBarcodeAnalyzer(
             onScanningError(OSBARCError.SCANNING_GENERAL_ERROR)
         }
         image.close()
+    }
+
+    private fun matchesScanLine(
+        boundingBox: OSBARCBoundingBox,
+        centerY: Float,
+        imageHeight: Float
+    ): Boolean {
+        val tolerancePx = max(imageHeight * SCAN_LINE_TOLERANCE_RATIO, MIN_SCAN_LINE_TOLERANCE_PX)
+        val boxHeight = abs(boundingBox.bottom - boundingBox.top)
+
+        if (boxHeight <= tolerancePx) {
+            val boxCenterY = (boundingBox.top + boundingBox.bottom) / 2f
+            return abs(boxCenterY - centerY) <= tolerancePx
+        }
+
+        return boundingBox.top <= centerY && boundingBox.bottom >= centerY
     }
 
     /**

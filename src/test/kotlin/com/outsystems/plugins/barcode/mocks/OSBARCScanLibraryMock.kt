@@ -20,7 +20,7 @@ class OSBARCScanLibraryMock: OSBARCScanLibraryInterface {
         onError: (OSBARCError) -> Unit
     ) {
         if (success) {
-            onSuccess(OSBARCScanResult("myCode", OSBARCScannerHint.QR_CODE))
+            onSuccess(resultCode)
         }
         else if (!exception) {
             onError(error)
