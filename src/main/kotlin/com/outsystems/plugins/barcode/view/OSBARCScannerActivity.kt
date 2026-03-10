@@ -192,6 +192,10 @@ class OSBARCScannerActivity : ComponentActivity() {
         private const val ORIENTATION_PORTRAIT = 1
         private const val ORIENTATION_LANDSCAPE = 2
         private const val ONE_D_WIDTH_SCALE = 1.2f
+        private const val ONE_D_MIN_ASPECT_RATIO = 6f
+        private const val ONE_D_MAX_WIDTH_RATIO = 0.85f
+        private const val ONE_D_MAX_HEIGHT_RATIO = 0.2f
+        private const val ONE_D_RENDER_MIN_ASPECT_RATIO = 4f
 
         internal fun buildScanLockKey(scanResult: OSBARCScanResult): String {
             return "${scanResult.format}|${scanResult.text}"
@@ -227,10 +231,69 @@ class OSBARCScannerActivity : ComponentActivity() {
                 return box
             }
             val centerX = (box.left + box.right) / 2f
-            val halfWidth = ((box.right - box.left) / 2f) * widthScale
-            return box.copy(
+            val centerY = (box.top + box.bottom) / 2f
+            val rawWidth = (box.right - box.left).coerceAtLeast(1f)
+            val rawHeight = (box.bottom - box.top).coerceAtLeast(1f)
+
+            var targetWidth = rawWidth * widthScale
+            var targetHeight = rawHeight
+
+            // If the detected 1D box comes in as a vertical strip, normalize it to a horizontal
+            // barcode-like aspect ratio for rendering without affecting scan acceptance logic.
+            if (rawHeight > rawWidth) {
+                targetWidth = maxOf(targetWidth, rawHeight * ONE_D_MIN_ASPECT_RATIO)
+                targetHeight = minOf(targetHeight, targetWidth / ONE_D_MIN_ASPECT_RATIO)
+            }
+
+            val halfWidth = targetWidth / 2f
+            val halfHeight = targetHeight / 2f
+            return OSBARCBoundingBox(
                 left = centerX - halfWidth,
-                right = centerX + halfWidth
+                top = centerY - halfHeight,
+                right = centerX + halfWidth,
+                bottom = centerY + halfHeight
+            )
+        }
+
+        internal fun clampOneDimensionalHighlightBox(
+            box: OSBARCBoundingBox,
+            scanWindowWidth: Float,
+            scanWindowHeight: Float,
+            maxWidthRatio: Float = ONE_D_MAX_WIDTH_RATIO,
+            maxHeightRatio: Float = ONE_D_MAX_HEIGHT_RATIO,
+            minAspectRatio: Float = ONE_D_RENDER_MIN_ASPECT_RATIO
+        ): OSBARCBoundingBox {
+            if (scanWindowWidth <= 0f || scanWindowHeight <= 0f) {
+                return box
+            }
+
+            val centerX = (box.left + box.right) / 2f
+            val centerY = (box.top + box.bottom) / 2f
+            var targetWidth = (box.right - box.left).coerceAtLeast(1f)
+            var targetHeight = (box.bottom - box.top).coerceAtLeast(1f)
+
+            val maxWidth = (scanWindowWidth * maxWidthRatio).coerceAtLeast(1f)
+            val maxHeight = (scanWindowHeight * maxHeightRatio).coerceAtLeast(1f)
+
+            targetWidth = minOf(targetWidth, maxWidth)
+            targetHeight = minOf(targetHeight, maxHeight)
+
+            val currentAspectRatio = targetWidth / targetHeight
+            if (currentAspectRatio < minAspectRatio) {
+                targetHeight = maxOf(1f, targetWidth / minAspectRatio)
+                if (targetHeight > maxHeight) {
+                    targetHeight = maxHeight
+                    targetWidth = minOf(maxWidth, targetHeight * minAspectRatio)
+                }
+            }
+
+            val halfWidth = targetWidth / 2f
+            val halfHeight = targetHeight / 2f
+            return OSBARCBoundingBox(
+                left = centerX - halfWidth,
+                top = centerY - halfHeight,
+                right = centerX + halfWidth,
+                bottom = centerY + halfHeight
             )
         }
     }
@@ -1243,6 +1306,11 @@ class OSBARCScannerActivity : ComponentActivity() {
 
         if (isOneDimensionalFormat(scanResult.format)) {
             mappedBox = widenOneDimensionalBox(mappedBox)
+            mappedBox = clampOneDimensionalHighlightBox(
+                box = mappedBox,
+                scanWindowWidth = mappedWidth,
+                scanWindowHeight = mappedHeight
+            )
         }
 
         val clamped = OSBARCBoundingBox(

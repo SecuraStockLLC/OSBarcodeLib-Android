@@ -57,5 +57,40 @@ class OSBARCScannerActivityTrackingTests {
         assertEquals(original.top, widened.top, 0.001f)
         assertEquals(original.bottom, widened.bottom, 0.001f)
     }
-}
 
+    @Test
+    fun givenTallNarrowBoundingBoxWhenWidenOneDimensionalBoxThenNormalizedToHorizontal() {
+        val original = OSBARCBoundingBox(left = 50f, top = 20f, right = 60f, bottom = 120f)
+
+        val widened = OSBARCScannerActivity.widenOneDimensionalBox(original, widthScale = 1.2f)
+
+        val widenedWidth = widened.right - widened.left
+        val widenedHeight = widened.bottom - widened.top
+        assertTrue(widenedWidth > widenedHeight)
+        assertTrue((widenedWidth / widenedHeight) >= 5.9f)
+    }
+
+    @Test
+    fun givenOversizedOneDimensionalBoxWhenClampedThenSizeConstrainedAndCenterPreserved() {
+        val original = OSBARCBoundingBox(left = -300f, top = 20f, right = 900f, bottom = 260f)
+
+        val clamped = OSBARCScannerActivity.clampOneDimensionalHighlightBox(
+            box = original,
+            scanWindowWidth = 300f,
+            scanWindowHeight = 300f
+        )
+
+        val clampedWidth = clamped.right - clamped.left
+        val clampedHeight = clamped.bottom - clamped.top
+        val originalCenterX = (original.left + original.right) / 2f
+        val originalCenterY = (original.top + original.bottom) / 2f
+        val clampedCenterX = (clamped.left + clamped.right) / 2f
+        val clampedCenterY = (clamped.top + clamped.bottom) / 2f
+
+        assertTrue(clampedWidth <= 255.001f)
+        assertTrue(clampedHeight <= 60.001f)
+        assertTrue((clampedWidth / clampedHeight) >= 3.9f)
+        assertEquals(originalCenterX, clampedCenterX, 0.001f)
+        assertEquals(originalCenterY, clampedCenterY, 0.001f)
+    }
+}
