@@ -577,6 +577,211 @@ class ScanCodeTests {
     }
 
     @Test
+    fun givenCode128SlightlyAboveRedLineWithinBandWhenScanLineEnabledThenSuccess() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 313f, 220f, 319f)
+            )
+        }
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                assertEquals(scanLibMock.resultCode, it)
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+    }
+
+    @Test
+    fun givenCode128SlightlyBelowRedLineWithinBandWhenScanLineEnabledThenSuccess() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 321f, 220f, 327f)
+            )
+        }
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                assertEquals(scanLibMock.resultCode, it)
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+    }
+
+    @Test
+    fun givenCode128AboveRedLineBeyondBandWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 310f, 220f, 317f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
+    }
+
+    @Test
+    fun givenCode128BelowRedLineBeyondBandWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.CODE_128,
+                OSBARCBoundingBox(10f, 323f, 220f, 330f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
+    }
+
+    @Test
+    fun givenQrSlightlyAboveRedLineWithinTwoDBandWhenScanLineEnabledThenSuccess() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.QR_CODE,
+                OSBARCBoundingBox(90f, 302f, 210f, 309f)
+            )
+        }
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                assertEquals(scanLibMock.resultCode, it)
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+    }
+
+    @Test
+    fun givenQrSlightlyBelowRedLineWithinTwoDBandWhenScanLineEnabledThenSuccess() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.QR_CODE,
+                OSBARCBoundingBox(90f, 332f, 210f, 340f)
+            )
+        }
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                assertEquals(scanLibMock.resultCode, it)
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+    }
+
+    @Test
+    fun givenQrAboveRedLineBeyondTwoDBandWhenScanLineEnabledThenIgnoreResult() {
+        val scanLibMock = OSBARCScanLibraryMock().apply {
+            success = true
+            resultCode = OSBARCScanResult(
+                "myCode",
+                OSBARCScannerHint.QR_CODE,
+                OSBARCBoundingBox(90f, 280f, 210f, 294f)
+            )
+        }
+        var wasSuccessCalled = false
+
+        Mockito.doReturn(mockBitmap).`when`(mockImageProxy).toBitmap()
+        Mockito.doReturn(640).`when`(imageHelperMock.subsetBitmap).height
+        Mockito.doReturn(360).`when`(imageHelperMock.subsetBitmap).width
+
+        OSBARCBarcodeAnalyzer(
+            scanLibMock,
+            imageHelperMock,
+            {
+                wasSuccessCalled = true
+            },
+            {
+                fail()
+            },
+            scanLineEnabled = true
+        ).analyze(mockImageProxy)
+
+        assertFalse(wasSuccessCalled)
+    }
+
+    @Test
     fun givenOneDimensionalBoundingBoxCrossesCenterButCenterOffsetWhenScanLineEnabledThenIgnoreResult() {
         val scanLibMock = OSBARCScanLibraryMock().apply {
             success = true

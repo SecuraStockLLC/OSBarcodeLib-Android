@@ -38,9 +38,13 @@ class OSBARCBarcodeAnalyzer(
         private const val SCAN_LINE_TOLERANCE_RATIO = 0.015f
         private const val MIN_SCAN_LINE_TOLERANCE_PX = 5f
         private const val MAX_SCAN_LINE_TOLERANCE_PX = 12f
+        private const val TWO_D_SCAN_LINE_TOLERANCE_RATIO = 0.02f
+        private const val TWO_D_MIN_SCAN_LINE_TOLERANCE_PX = 8f
+        private const val TWO_D_MAX_SCAN_LINE_TOLERANCE_PX = 16f
         private const val ONE_D_SCAN_LINE_TOLERANCE_RATIO = 0.0045f
         private const val ONE_D_MIN_SCAN_LINE_TOLERANCE_PX = 2f
         private const val ONE_D_MAX_SCAN_LINE_TOLERANCE_PX = 4f
+        private const val CODE_128_SCAN_LINE_BAND_PX = 2f
     }
 
     /**
@@ -89,11 +93,25 @@ class OSBARCBarcodeAnalyzer(
         val boxBottom = max(boundingBox.top, boundingBox.bottom)
         val boxHeight = abs(boxBottom - boxTop)
 
+        if (scanResult.format == OSBARCScannerHint.CODE_128) {
+            val bandTop = centerY - CODE_128_SCAN_LINE_BAND_PX
+            val bandBottom = centerY + CODE_128_SCAN_LINE_BAND_PX
+            return boxTop <= bandBottom && boxBottom >= bandTop
+        }
+
         if (isOneDimensionalFormat(scanResult.format)) {
             val tolerancePx = (imageHeight * ONE_D_SCAN_LINE_TOLERANCE_RATIO)
                 .coerceIn(ONE_D_MIN_SCAN_LINE_TOLERANCE_PX, ONE_D_MAX_SCAN_LINE_TOLERANCE_PX)
             val boxCenterY = (boxTop + boxBottom) / 2f
             return abs(boxCenterY - centerY) <= tolerancePx
+        }
+
+        if (isTwoDimensionalFormat(scanResult.format)) {
+            val tolerancePx = (imageHeight * TWO_D_SCAN_LINE_TOLERANCE_RATIO)
+                .coerceIn(TWO_D_MIN_SCAN_LINE_TOLERANCE_PX, TWO_D_MAX_SCAN_LINE_TOLERANCE_PX)
+            val bandTop = centerY - tolerancePx
+            val bandBottom = centerY + tolerancePx
+            return boxTop <= bandBottom && boxBottom >= bandTop
         }
 
         val tolerancePx = (imageHeight * SCAN_LINE_TOLERANCE_RATIO)
@@ -121,6 +139,17 @@ class OSBARCBarcodeAnalyzer(
             OSBARCScannerHint.UPC_A,
             OSBARCScannerHint.UPC_E,
             OSBARCScannerHint.UPC_EAN_EXTENSION -> true
+            else -> false
+        }
+    }
+
+    private fun isTwoDimensionalFormat(format: OSBARCScannerHint): Boolean {
+        return when (format) {
+            OSBARCScannerHint.QR_CODE,
+            OSBARCScannerHint.AZTEC,
+            OSBARCScannerHint.DATA_MATRIX,
+            OSBARCScannerHint.PDF_417,
+            OSBARCScannerHint.MAXICODE -> true
             else -> false
         }
     }
